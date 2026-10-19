@@ -1,5 +1,6 @@
 Contact: mailto:security@lastlegitimate.com
-Expires: 2027-10-17T23:00:00.000Z
+Expires: 2027-10-18T00:00:00.000Z
 Preferred-Languages: en, de
 Canonical: https://lastlegitimate.com/.well-known/security.txt
-Policy: coordinated disclosure only; nothing is published before a fix is released
+Policy: https://lastlegitimate.com/#record
+# Coordinated disclosure only. Nothing is published before a fix ships.
