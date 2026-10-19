@@ -1,5 +1,4 @@
 User-agent: *
-Disallow: /nothing-to-see-here
+Allow: /
 
-# the real treasure is in view-source.
-# and in /.well-known/security.txt, like a professional.
+# Researchers: /.well-known/security.txt
