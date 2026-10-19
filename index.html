@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>lastlegitimate@research:~</title>
+<meta name="description" content="Interactive terminal of lastlegitimate — independent security research. Type 'help'.">
+<style>
+  :root { color-scheme: dark; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+    background: #050807; color: #b8f5c4; overflow: hidden;
+  }
+  #matrix { position: fixed; inset: 0; z-index: 0; opacity: .13; }
+  .scanlines {
+    position: fixed; inset: 0; z-index: 3; pointer-events: none;
+    background: repeating-linear-gradient(0deg, transparent 0 2px, rgba(0,0,0,.22) 2px 4px);
+  }
+  .vignette {
+    position: fixed; inset: 0; z-index: 2; pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.55) 100%);
+  }
+  #term {
+    position: relative; z-index: 4; height: 100%; overflow-y: auto;
+    padding: 20px clamp(14px, 4vw, 48px) 30px; font-size: clamp(13px, 1.6vw, 16px);
+    line-height: 1.55; cursor: text; scrollbar-width: thin; scrollbar-color: #1d4a28 #050807;
+  }
+  #term a { color: #7dfba0; }
+  .dim { color: #4e7a58; } .bright { color: #d6ffe2; } .warn { color: #ffd166; }
+  .err { color: #ff6b6b; } .accent { color: #57e389; }
+  .glitch { position: relative; display: inline-block; font-weight: 700; letter-spacing: .08em; }
+  .glitch::before, .glitch::after {
+    content: attr(data-text); position: absolute; inset: 0; overflow: hidden;
+  }
+  .glitch::before { color: #0ff; transform: translate(-2px, 0); clip-path: polygon(0 0, 100% 0, 100% 38%, 0 38%); animation: g1 3.1s infinite linear alternate-reverse; }
+  .glitch::after { color: #f0f; transform: translate(2px, 0); clip-path: polygon(0 62%, 100% 62%, 100% 100%, 0 100%); animation: g2 2.7s infinite linear alternate-reverse; }
+  @keyframes g1 { 0%{clip-path:inset(12% 0 82% 0)} 25%{clip-path:inset(58% 0 30% 0)} 50%{clip-path:inset(4% 0 90% 0)} 75%{clip-path:inset(70% 0 12% 0)} 100%{clip-path:inset(38% 0 52% 0)} }
+  @keyframes g2 { 0%{clip-path:inset(78% 0 8% 0)} 25%{clip-path:inset(22% 0 64% 0)} 50%{clip-path:inset(90% 0 2% 0)} 75%{clip-path:inset(10% 0 76% 0)} 100%{clip-path:inset(50% 0 40% 0)} }
+  .line { white-space: pre-wrap; word-break: break-word; }
+  .prompt { color: #57e389; }
+  .cursor { display: inline-block; width: .62em; height: 1.15em; background: #57e389;
+            vertical-align: text-bottom; animation: blink 1.05s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .bar { display: inline-block; height: .7em; background: #57e389; margin-right: .6em; position: relative; top: .1em; }
+  .chips { display: none; flex-wrap: wrap; gap: 8px; padding: 10px 0; }
+  .chips button {
+    font: inherit; background: #0b150e; color: #7dfba0; border: 1px solid #1d4a28;
+    padding: 5px 12px; border-radius: 4px; cursor: pointer;
+  }
+  .chips button:active { background: #142a19; }
+  @media (pointer: coarse) { .chips { display: flex; } }
+  body.rainbow { animation: hue 2.5s linear infinite; }
+  @keyframes hue { to { filter: hue-rotate(360deg); } }
+</style>
+</head>
+<body>
+<canvas id="matrix"></canvas>
+<div class="vignette"></div>
+<div class="scanlines"></div>
+<div id="term" aria-live="polite">
+  <div class="chips" id="chips">
+    <button data-c="whoami">whoami</button>
+    <button data-c="skills">skills</button>
+    <button data-c="writeups">writeups</button>
+    <button data-c="contact">contact</button>
+    <button data-c="hack">hack</button>
+  </div>
+</div>
+<script>
+"use strict";
+const term = document.getElementById("term");
+const chips = document.getElementById("chips");
+let input = "", hist = [], histIdx = -1, booted = false;
+let ghostMode = false;
+
+const ESC = s => s.replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;", ">":"&gt;"}[c]));
+function line(html, cls) {
+  const d = document.createElement("div");
+  d.className = "line" + (cls ? " " + cls : "");
+  d.innerHTML = html;
+  term.appendChild(d);
+  term.scrollTop = term.scrollHeight;
+  return d;
+}
+async function type(text, cls, speed = 7) {
+  const d = line("", cls);
+  for (let i = 0; i < text.length; i++) {
+    d.textContent += text[i];
+    term.scrollTop = term.scrollHeight;
+    await new Promise(r => setTimeout(r, speed));
+  }
+  return d;
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+/* matrix rain */
+(() => {
+  const cv = document.getElementById("matrix"), cx = cv.getContext("2d");
+  let cols, drops, glyphs = "01ﬁ<>{}[]/$#*+=ABCDEF";
+  function size() {
+    cv.width = innerWidth; cv.height = innerHeight;
+    cols = Math.floor(cv.width / 16);
+    drops = Array(cols).fill(0).map(() => Math.random() * -80);
+  }
+  size(); addEventListener("resize", size);
+  setInterval(() => {
+    cx.fillStyle = "rgba(5,8,7,.09)"; cx.fillRect(0, 0, cv.width, cv.height);
+    cx.font = "14px monospace";
+    drops.forEach((y, i) => {
+      cx.fillStyle = Math.random() < .03 ? "#c8ffdd" : "#1c8a3f";
+      cx.fillText(glyphs[Math.random() * glyphs.length | 0], i * 16, y * 16);
+      drops[i] = y * 16 > cv.height && Math.random() > .975 ? 0 : y + 1;
+    });
+  }, 50);
+})();
+
+/* command handlers */
+const CMD = {
+  help() {
+    line(`available commands:
+  <span class="accent">whoami</span>      who is behind this alias
+  <span class="accent">skills</span>      capability matrix
+  <span class="accent">writeups</span>    disclosures & research notes
+  <span class="accent">recon</span>       tools of the trade
+  <span class="accent">contact</span>     pgp-free, mail-based comms
+  <span class="accent">banner</span>      redisplay the banner
+  <span class="accent">clear</span>       wipe the screen
+  <span class="dim">…tab completes. arrows recall history.
+     some things here are hidden.</span>`);
+  },
+  whoami() {
+    line(`<span class="bright">lastlegitimate</span> — independent security researcher.
+method: read the source, diff the patch, trust nothing.
+currently hunting in open-source codebases; first disclosure
+in coordinated responsible disclosure pipeline.
+<span class="dim">the handle is a promise, not a description of the industry.</span>`);
+  },
+  skills() {
+    const rows = [
+      ["source-code review", 92], ["patch diffing", 88],
+      ["reverse engineering", 78], ["web / electron targets", 74],
+      ["report writing", 90], ["sleeping", 12],
+    ];
+    for (const [name, v] of rows) {
+      const fill = Math.round(v / 5);
+      const bar = "█".repeat(fill) + "░".repeat(20 - fill);
+      line(`  ${name.padEnd(22, " ").replace(/ /g, "&nbsp;")}<span class="bar" style="width:0"></span><span class="dim">${bar}</span> <span class="accent">${v}%</span>`);
+    }
+    line(`<span class="dim">bars are self-assessed. take with appropriate salt.</span>`);
+  },
+  writeups() {
+    line(`<span class="warn">write-ups: 1 pending</span>
+  <span class="dim">└─</span> race condition, data-destruction class, OSS target
+     status: reproduced, verified, report drafted
+     lands here the day the vendor discloses the fix
+<span class="dim">nothing gets published before coordinated disclosure. that's the whole point of the name.</span>`);
+  },
+  recon() {
+    line(`tools on rotation:
+  <span class="accent">rea</span>         reverse-engineering pipeline (binaries, apps, captures)
+  <span class="accent">ghidra</span>      when the disassembly needs a second opinion
+  <span class="accent">git</span>         the most underrated vulnerability scanner
+  <span class="accent">python</span>      glue, parsers, one-off fuzzers
+  <span class="accent">coffee</span>      runtime dependency, see skills matrix`);
+  },
+  contact() {
+    line(`mail:    <a href="mailto:security@lastlegitimate.com">security@lastlegitimate.com</a>
+reports: <a href="https://hackerone.com/lastlegitimate">hackerone.com/lastlegitimate</a>
+code:    <a href="https://github.com/lastlegitimate">github.com/lastlegitimate</a>
+<span class="dim">disclosure policy: /.well-known/security.txt — as it should be.</span>`);
+  },
+  banner() { printBanner(); },
+  clear() { document.querySelectorAll("#term .line").forEach(e => e.remove()); },
+  ls() { line(`about.txt   skills.bin   writeups/   tools/   <span class="accent">flag.txt</span>   <span class="dim">.secrets.env</span>`); },
+  cat(arg) {
+    if (arg === "flag.txt") line(`<span class="accent">flag{curiosity_is_a_deployment_strategy}</span>`);
+    else if (arg === ".secrets.env") line(`<span class="err">403 forbidden</span> <span class="dim">— nice try though.</span>`);
+    else if (arg === "about.txt") CMD.whoami();
+    else line(`cat: ${ESC(arg || "")}: no such file`, "err");
+  },
+  async hack() {
+    await type("initializing attack framework...", "warn", 18);
+    for (const t of ["scanning 255.255.255.255", "bypassing firewall ⟵ (it was unplugged)",
+      "deploying payload", "cracking RSA with vibes"]) {
+      await type("  " + t, "dim", 6); await sleep(160);
+    }
+    await sleep(400);
+    line(`<span class="err">ACCESS DENIED</span> <span class="dim">— this terminal is read-only. unlike my bug reports.</span>`);
+  },
+  async sudo(args) {
+    if (args.includes("rm")) { line(`<span class="err">nice try.</span> rm is not installed. neither is mercy.`); return; }
+    line(`<span class="err">lastlegitimate is not in the sudoers file.</span> <span class="dim">this incident will be reported.</span>`);
+  },
+  exit() { line(`<span class="dim">there is no exit. only disclosure.</span>`); },
+};
+
+function printBanner() {
+  line(`<span class="glitch" data-text="LASTLEGITIMATE">LASTLEGITIMATE</span>  <span class="dim">· security research · est. 2026</span>
+<span class="dim">type</span> <span class="accent">help</span> <span class="dim">to begin — or just poke around.</span>
+`);
+}
+
+/* input handling */
+function drawPrompt() {
+  line(`<span class="prompt">lastlegitimate@research:~$</span> <span class="input-text"></span><span class="cursor"></span>`);
+  return term.lastElementChild;
+}
+let activeRow = null;
+function commitInput() {
+  if (!activeRow) return;
+  const t = activeRow.querySelector(".input-text");
+  t.textContent = input;
+  activeRow.querySelector(".cursor").remove();
+  activeRow = null;
+}
+async function run(raw) {
+  const [cmd, ...args] = raw.trim().split(/\s+/);
+  if (!cmd) return;
+  const fn = CMD[cmd.toLowerCase()];
+  if (fn) await fn(args.join(" "));
+  else line(`command not found: ${ESC(cmd)} <span class="dim">— try 'help'</span>`, "err");
+}
+
+/* hidden input capture */
+const hidden = document.createElement("input");
+hidden.style.cssText = "position:fixed;opacity:0;pointer-events:none;left:-9999px";
+document.body.appendChild(hidden);
+term.addEventListener("click", () => booted && hidden.focus({preventScroll: true}));
+hidden.addEventListener("input", () => {
+  input = hidden.value;
+  if (activeRow) activeRow.querySelector(".input-text").textContent = input;
+  term.scrollTop = term.scrollHeight;
+});
+hidden.addEventListener("keydown", async e => {
+  if (!booted) return;
+  if (e.key === "Enter") {
+    const cmd = input; hidden.value = ""; input = "";
+    commitInput();
+    if (cmd.trim()) { hist.push(cmd); histIdx = hist.length; }
+    await run(cmd);
+    activeRow = drawPrompt();
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    if (histIdx > 0) { histIdx--; input = hist[histIdx]; hidden.value = input;
+      activeRow.querySelector(".input-text").textContent = input; }
+  } else if (e.key === "ArrowDown") {
+    e.preventDefault();
+    if (histIdx < hist.length - 1) { histIdx++; input = hist[histIdx]; }
+    else { histIdx = hist.length; input = ""; }
+    hidden.value = input;
+    activeRow.querySelector(".input-text").textContent = input;
+  } else if (e.key === "Tab") {
+    e.preventDefault();
+    const m = Object.keys(CMD).filter(c => c.startsWith(input.toLowerCase()));
+    if (m.length === 1) { input = m[0]; hidden.value = input;
+      activeRow.querySelector(".input-text").textContent = input; }
+  }
+});
+chips.addEventListener("click", async e => {
+  const c = e.target.dataset.c; if (!c || !booted) return;
+  commitInput(); if (activeRow?.querySelector) activeRow.querySelector(".cursor")?.remove();
+  await run(c); activeRow = drawPrompt(); hidden.focus({preventScroll: true});
+});
+
+/* konami */
+let konami = [], KONAMI = ["ArrowUp","ArrowUp","ArrowDown","ArrowDown","ArrowLeft","ArrowRight","ArrowLeft","ArrowRight","b","a"];
+addEventListener("keydown", e => {
+  konami.push(e.key); konami = konami.slice(-10);
+  if (KONAMI.every((k, i) => k === konami[i])) {
+    document.body.classList.toggle("rainbow");
+    line(`<span class="warn">↑↑↓↓←→←→BA — the old magic still works.</span>`);
+  }
+});
+
+/* boot sequence */
+(async () => {
+  const boot = [
+    ["[  OK  ] reached target basic system", 90],
+    ["[  OK  ] mounted /dev/paranoia", 110],
+    ["[  OK  ] started matrix-rain.service", 130],
+    ["[  OK  ] started curiosity-daemon (pid 1337)", 120],
+    ["[  OK  ] loaded kernel modules: diff, grep, why-not", 140],
+    "[ WARN ] coffee levels below threshold", 
+    ["[  OK  ] verification: visitor is not a bot... probably", 160],
+    "",
+  ];
+  await sleep(350);
+  for (const b of boot) {
+    const s = typeof b === "string" ? b : b[0];
+    const d = typeof b === "string" ? 120 : b[1];
+    if (s.startsWith("[ WARN")) line(ESC(s), "warn"); else if (s) line(ESC(s), "dim");
+    await sleep(d);
+  }
+  await sleep(200);
+  printBanner();
+  await type("access granted.", "accent", 34);
+  line(`<span class="bright">security research</span> · source-code review · patch diffing · OSS targets
+first disclosure: <span class="warn">reproduced &amp; verified — in the pipeline</span>
+mail <a href="mailto:security@lastlegitimate.com">security@lastlegitimate.com</a> · <a href="https://hackerone.com/lastlegitimate">hackerone</a> · <a href="https://github.com/lastlegitimate">github</a>
+<span class="dim">in a hurry? that's everything. curious? type</span> <span class="accent">help</span><span class="dim">.</span>
+`);
+  booted = true;
+  activeRow = drawPrompt();
+  hidden.focus({preventScroll: true});
+})();
+</script>
+</body>
+</html>
